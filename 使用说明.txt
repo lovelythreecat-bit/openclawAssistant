@@ -1,0 +1,28 @@
+库洛 · OpenClaw 桌面工作台
+
+开始使用
+1. 双击本目录 Start-Kuro.cmd（本机使用，启动较快）。
+2. 或双击 release\Kuro-0.1.0-Windows-x64.exe（单文件免安装版）。
+3. 首次启动会尝试读取 Ubuntu-24.04 的网关配置并连接。
+4. 看到“已连接”后，就可以发起聊天或打开已有会话。
+
+如果没有自动连上
+进入“设置”，确认 WSL 发行版名称，点击“从 WSL 导入”。
+也可以手工设置本机网关地址及 Token/Password，再到“网关”页连接。
+库洛连接已有网关，不会自动安装或重启 OpenClaw。
+
+已完成
+萌系独立界面、库洛角色图片、网关连接状态、聊天与流式回复、停止回复、
+历史会话与搜索、Markdown/代码块、WSL 配置导入及 Windows 加密保存。
+
+验收结果
+36 项自动测试通过；实际 WSL 网关和历史读取通过；
+目录版交互及便携 EXE 启动均通过。
+没有自动向你的真实会话发送测试消息。
+
+更多说明：README.md
+验收记录：docs\verification-notes.md
+界面截图：docs\screenshots
+
+目录版的 release\win-unpacked 必须整体保留，不能只拷贝其中 Kuro.exe。
+便携版的设置仍保存到当前 Windows 用户的应用数据目录。

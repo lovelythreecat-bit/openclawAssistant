@@ -1,0 +1,25 @@
+Live2D companion assets used by Kuro
+
+Shizuku model / artwork / rigging: Live2D Inc.
+Source: user-provided docs/live2d/shizuku_ja/runtime, unchanged.
+Original model instructions and license notice: shizuku/ReadMe.txt.
+Sample-data usage terms: https://www.live2d.com/download/sample-data/
+The original notice permits general users and small businesses to use the
+material commercially subject to the applicable terms. Medium/large businesses
+are limited to private testing. This notice does not grant additional rights.
+
+Cubism Core: Copyright Live2D Inc., all rights reserved.
+Downloaded 2026-09-24 from:
+https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js
+SHA-256: 25AE938CB4FE282CE189B357BCC97E603D1E1F7EC78BF04150D401C23CDC792F
+Core's original license header remains in core/live2dcubismcore.min.js.
+https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html
+
+pixi-live2d-display 0.4.0: MIT, Copyright (c) 2020 Guan.
+PixiJS 6.5.10 and @pixi/unsafe-eval 6.5.10: MIT, PixiJS contributors.
+Their license texts are included in the licenses directory.
+The Cubism framework embedded in the adapter is provided by Live2D Inc.
+https://www.live2d.com/eula/live2d-open-software-license-agreement_en.html
+
+Model licensing and Cubism SDK licensing are separate. Review both applicable
+agreements before distributing or commercializing an application containing them.

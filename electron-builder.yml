@@ -1,0 +1,27 @@
+appId: local.kuro.openclaw
+productName: Kuro
+artifactName: Kuro-${version}-Windows-${arch}.${ext}
+directories:
+  output: release
+asar: true
+npmRebuild: false
+electronDist: node_modules/electron/dist
+forceCodeSigning: false
+publish: null
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - electron/preload.cjs
+  - assets/concepts/mascot-welcome-v1.png
+  - package.json
+win:
+  executableName: Kuro
+  icon: assets/concepts/kuro.ico
+  target:
+    - target: portable
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker
+  signExecutable: false
+portable:
+  requestExecutionLevel: user

@@ -1,0 +1,198 @@
+import { Application, ShaderSystem, Texture, utils } from 'pixi.js';
+import { install } from '@pixi/unsafe-eval';
+import type { Cubism4InternalModel, Live2DModel } from 'pixi-live2d-display/cubism4';
+import shizuku from '../../public/live2d/shizuku/shizuku.model3.json';
+
+// Interpreted uniform upload keeps general JavaScript eval disabled.
+install({ ShaderSystem });
+let corePromise: Promise<void> | undefined;
+let loadingQueue = Promise.resolve();
+
+function loadCore(): Promise<void> {
+  if (corePromise) return corePromise;
+  corePromise = new Promise<void>((resolve, reject) => {
+    const script = document.createElement('script');
+    const timeout = window.setTimeout(() => failed(), 15000);
+    const failed = () => {
+      window.clearTimeout(timeout);
+      script.remove();
+      reject(new Error('Live2D 运行库加载失败'));
+    };
+    script.src = new URL('live2d/core/live2dcubismcore.min.js', document.baseURI).href;
+    script.onload = () => { window.clearTimeout(timeout); resolve(); };
+    script.onerror = failed;
+    document.head.append(script);
+  }).catch(error => { corePromise = undefined; throw error; });
+  return corePromise;
+}
+
+export interface CompanionRenderer {
+  greet(): Promise<boolean>;
+  destroy(): void;
+}
+
+export function mountCompanion(host: HTMLDivElement, callbacks: {
+  ready(): void;
+  error(error: unknown): void;
+  motion(name: string): void;
+}): CompanionRenderer {
+  let disposed = false;
+  let loaded = false;
+  let failed = false;
+  let app: Application | undefined;
+  let model: Live2DModel<Cubism4InternalModel> | undefined;
+  let observer: ResizeObserver | undefined;
+  let removeListeners = () => {};
+  let reducedMotion = false;
+  const modelURL = new URL('live2d/shizuku/shizuku.model3.json', document.baseURI).href;
+  const textureURLs = shizuku.FileReferences.Textures.map(file => new URL(file, modelURL).href);
+
+  const release = () => {
+    loaded = false;
+    observer?.disconnect();
+    removeListeners();
+    if (model?.internalModel && !model.destroyed) model.destroy({ texture: true, baseTexture: true });
+    model = undefined;
+    // A failed ImageResource is cached too; clear only this model's owned URLs.
+    for (const url of textureURLs) utils.TextureCache[url]?.destroy(true);
+    app?.destroy(true, { children: true });
+    app = undefined;
+  };
+
+  const load = async () => {
+    if (disposed) return;
+    try {
+      await loadCore();
+      const runtime = await import('pixi-live2d-display/cubism4');
+      if (disposed) return;
+      runtime.config.logLevel = runtime.config.LOG_LEVEL_WARNING;
+      app = new Application({
+        width: Math.max(host.clientWidth, 1), height: Math.max(host.clientHeight, 1),
+        backgroundAlpha: 0, antialias: true, autoDensity: true,
+        resolution: Math.min(window.devicePixelRatio || 1, 2), autoStart: false,
+      });
+      app.ticker.maxFPS = 30;
+      const canvas = app.view as HTMLCanvasElement;
+      canvas.setAttribute('aria-hidden', 'true');
+      host.append(canvas);
+      // Await every texture before constructing the model. The library starts
+      // these in parallel but cannot expose partially loaded textures on error.
+      const textures = await Promise.allSettled(textureURLs.map(url => Texture.fromURL(url)));
+      const textureError = textures.find(result => result.status === 'rejected');
+      if (textureError?.status === 'rejected') throw textureError.reason;
+      if (disposed) { release(); return; }
+      // Serial loading prevents a closing model from destroying a newer model's cached textures.
+      await new Promise<void>((resolve, reject) => {
+        model = runtime.Live2DModel.fromSync(
+          modelURL,
+          { autoInteract: false, autoUpdate: false, motionPreload: runtime.MotionPreloadStrategy.ALL,
+            onLoad: resolve, onError: reject },
+        ) as Live2DModel<Cubism4InternalModel>;
+      });
+      if (disposed) { release(); return; }
+      const character = model!;
+      const internal = character.internalModel;
+      // This Cubism 2 conversion retains its original parameter IDs.
+      Object.assign(internal, {
+        idParamAngleX: 'PARAM_ANGLE_X', idParamAngleY: 'PARAM_ANGLE_Y', idParamAngleZ: 'PARAM_ANGLE_Z',
+        idParamEyeBallX: 'PARAM_EYE_BALL_X', idParamEyeBallY: 'PARAM_EYE_BALL_Y',
+        idParamBodyAngleX: 'PARAM_BODY_X', idParamBreath: 'PARAM_BREATH',
+      });
+      internal.breath.setParameters([
+        { parameterId: 'PARAM_ANGLE_X', offset: 0, peak: 3, cycle: 6.5, weight: 0.5 },
+        { parameterId: 'PARAM_ANGLE_Z', offset: 0, peak: 2, cycle: 5.5, weight: 0.5 },
+        { parameterId: 'PARAM_BREATH', offset: 0.5, peak: 0.5, cycle: 3.2, weight: 1 },
+      ]);
+      const tap = await internal.motionManager.loadMotion('Tap', 0);
+      if (disposed) { release(); return; }
+      tap?.setIsLoop(false);
+      internal.motionManager.on('motionFinish', () => callbacks.motion('Idle'));
+      app.stage.addChild(character);
+      const draw = (advance = false) => {
+        if (failed || !app) return;
+        try {
+          if (advance) character.update(Math.min(app.ticker.deltaMS, 100));
+          app.render();
+        } catch (error) { failed = true; app.stop(); callbacks.error(error); }
+      };
+      const fit = () => {
+        if (!app || !model) return;
+        const width = Math.max(1, host.clientWidth);
+        const height = Math.max(1, host.clientHeight);
+        app.renderer.resize(width, height);
+        const scale = Math.min(width * 0.96 / internal.width, height * 0.96 / internal.height);
+        character.scale.set(scale);
+        character.position.set((width - internal.width * scale) / 2, (height - internal.height * scale) / 2);
+        // Resizing clears WebGL's buffer, even when reduced motion stops the ticker.
+        draw();
+      };
+      fit();
+      observer = new ResizeObserver(fit);
+      observer.observe(host);
+
+      const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+      const move = (event: PointerEvent) => {
+        if (reducedMotion) return;
+        internal.focusController.focus(
+          Math.max(-0.65, Math.min(0.65, (event.clientX / innerWidth - 0.5) * 1.3)),
+          Math.max(-0.5, Math.min(0.5, (0.5 - event.clientY / innerHeight))),
+        );
+      };
+      const neutral = () => internal.focusController.focus(0, 0);
+      const visibility = () => {
+        if (!app) return;
+        if (document.hidden || reducedMotion || failed) app.stop(); else app.start();
+      };
+      const preferences = () => { reducedMotion = preference.matches; neutral(); visibility(); };
+      const contextLost = (event: Event) => {
+        event.preventDefault();
+        failed = true;
+        app?.stop();
+        callbacks.error(new Error('图形上下文已丢失'));
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('blur', neutral);
+      document.addEventListener('visibilitychange', visibility);
+      preference.addEventListener('change', preferences);
+      canvas.addEventListener('webglcontextlost', contextLost);
+      removeListeners = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('blur', neutral);
+        document.removeEventListener('visibilitychange', visibility);
+        preference.removeEventListener('change', preferences);
+        canvas.removeEventListener('webglcontextlost', contextLost);
+      };
+      // Actual Cubism updates run inside model._render(), not model.update().
+      // Own the render callback so both update and draw failures are isolated.
+      app.ticker.remove(app.render, app);
+      app.ticker.add(() => draw(true));
+      character.update(0);
+      draw();
+      if (failed) { release(); return; }
+      loaded = true;
+      preferences();
+      callbacks.motion('Idle');
+      callbacks.ready();
+    } catch (error) {
+      release();
+      if (!disposed) callbacks.error(error);
+    }
+  };
+  loadingQueue = loadingQueue.then(load, load);
+
+  return {
+    async greet() {
+      if (!loaded || disposed || failed || reducedMotion || !model) return false;
+      try {
+        const played = await model.motion('Tap', 0, 3);
+        if (played && !disposed) callbacks.motion('Tap');
+        return played;
+      } catch (error) { if (!disposed) callbacks.error(error); return false; }
+    },
+    destroy() {
+      disposed = true;
+      // Pending loads finish in the queue and then release their resources.
+      if (loaded) release(); else app?.stop();
+    },
+  };
+}
