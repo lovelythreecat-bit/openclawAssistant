@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Boxes, Check, Download, FolderOpen, LoaderCircle, Plus, RefreshCw, Search, Settings2, Sparkles, Trash2, WifiOff } from 'lucide-react';
+import { Boxes, Check, Download, FolderOpen, LoaderCircle, Plus, RefreshCw, Search, Settings2, Sparkles, Trash2, Undo2, WifiOff } from 'lucide-react';
 import type { ModelOption, ModelProvider, ModelSettings, MutationResult, PluginList, SkillInfo } from './management-types';
 import { errorText } from './useWorkspace';
 
@@ -20,6 +20,7 @@ const pageCopy = {
   plugins: { title: '插件', subtitle: '管理当前环境的插件，按需导入更多能力。', kicker: 'PLUGIN LIBRARY', icon: Boxes },
 };
 const apiTypes = ['openai-completions', 'openai-responses', 'openai-codex-responses', 'anthropic-messages', 'google-generative-ai', 'github-copilot', 'bedrock-converse-stream', 'ollama'];
+type ProviderDraft = Omit<ModelProvider, 'models'> & { models: (ModelProvider['models'][number] & { persisted?: boolean })[] };
 const emptyProvider = (): ModelProvider => ({ id: '', baseUrl: '', api: 'openai-completions', hasApiKey: false, models: [{ id: '', name: '' }] });
 
 export function ManagementPage(props: ManagementPageProps) {
@@ -43,7 +44,8 @@ function ManagementContent(props: ManagementPageProps) {
   const [selectedModel, setSelectedModel] = useState(sessionModel || '');
   const [defaultModel, setDefaultModel] = useState('');
   const [providerId, setProviderId] = useState('');
-  const [provider, setProvider] = useState<ModelProvider>(emptyProvider);
+  const [provider, setProvider] = useState<ProviderDraft>(emptyProvider);
+  const [removeModelIds, setRemoveModelIds] = useState<string[]>([]);
   const [apiKey, setApiKey] = useState('');
   const [pluginSource, setPluginSource] = useState('');
   const alive = useRef(false);
@@ -85,7 +87,9 @@ function ManagementContent(props: ManagementPageProps) {
         if (config.status === 'fulfilled') {
           setSettings(config.value); setDefaultModel(config.value.defaultModel);
           const selected = config.value.providers.find(item => item.id === selectedProviderId);
-          if (selected) setProvider({ ...selected, models: selected.models.map(model => ({ ...model })) });
+          setRemoveModelIds([]);
+          if (selected) setProvider({ ...selected, models: selected.models.map(model => ({ ...model, persisted: true })) });
+          else if (selectedProviderId) { setProviderId(''); setProvider(emptyProvider()); }
         } else { setSettings(undefined); failures.push(`模型配置：${errorText(config.reason)}`); }
         setError(safeText(failures.join('\n')));
       }
@@ -107,21 +111,48 @@ function ManagementContent(props: ManagementPageProps) {
   }
 
   function selectProvider(id: string) {
-    setProviderId(id); setApiKey('');
+    setProviderId(id); setApiKey(''); setRemoveModelIds([]);
     const selected = settings?.providers.find(item => item.id === id);
-    setProvider(selected ? { ...selected, models: selected.models.map(model => ({ ...model })) } : emptyProvider());
+    setProvider(selected ? { ...selected, models: selected.models.map(model => ({ ...model, persisted: true })) } : emptyProvider());
+  }
+
+  function isSavedDefault(id: string) {
+    return settings?.defaultModel === `${provider.id.trim()}/${id}`;
+  }
+
+  function removeModel(index: number) {
+    if (disabled || sessionBusy || !settings) return;
+    const model = provider.models[index];
+    if (!model) return;
+    if (!model.persisted) {
+      setProvider({ ...provider, models: provider.models.filter((_, position) => position !== index) });
+    } else if (removeModelIds.includes(model.id)) {
+      setRemoveModelIds(ids => ids.filter(id => id !== model.id));
+    } else if (isSavedDefault(model.id)) {
+      setError('不能删除默认模型，请先更改并保存默认模型。');
+    } else {
+      setRemoveModelIds(ids => [...new Set([...ids, model.id])]);
+    }
   }
 
   function saveProvider(event: FormEvent) {
     event.preventDefault();
     if (!settings || sessionBusy) return;
-    const normalizedModels = provider.models.map(model => ({ id: model.id.trim(), name: model.name.trim() || model.id.trim() }));
-    if (!normalizedModels.length || normalizedModels.some(model => !model.id)) { setError('请至少填写一个完整的模型 ID。'); return; }
+    const normalizedModels = provider.models
+      .filter(model => !model.persisted || !removeModelIds.includes(model.id))
+      .map(model => ({ id: model.id.trim(), name: model.name.trim() || model.id.trim() }));
+    if (removeModelIds.some(isSavedDefault)) { setError('不能删除默认模型，请先更改并保存默认模型。'); return; }
+    if (normalizedModels.some(model => removeModelIds.includes(model.id))) { setError('同一模型不能同时保留和删除，请先撤销删除或修改新增模型 ID。'); return; }
+    if ((!normalizedModels.length && !removeModelIds.length) || normalizedModels.some(model => !model.id)) { setError('请至少填写一个完整的模型 ID。'); return; }
     if (new Set(normalizedModels.map(model => model.id)).size !== normalizedModels.length) { setError('模型 ID 不能重复。'); return; }
     void mutate('保存服务配置', () => window.kuro.saveModelSettings({
       hash: settings.hash,
-      provider: { id: provider.id.trim(), baseUrl: provider.baseUrl.trim(), api: provider.api, models: normalizedModels, ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) },
-    }), async () => { setApiKey(''); setProviderId(provider.id.trim()); await load(provider.id.trim()); });
+      provider: { id: provider.id.trim(), baseUrl: provider.baseUrl.trim(), api: provider.api, models: normalizedModels, ...(removeModelIds.length ? { removeModelIds } : {}), ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}) },
+    }), async () => {
+      setApiKey(''); setRemoveModelIds([]);
+      setProvider({ ...provider, models: provider.models.filter(model => !model.persisted || !removeModelIds.includes(model.id)) });
+      setProviderId(provider.id.trim()); await load(provider.id.trim());
+    });
   }
 
   async function reconnect() {
@@ -145,7 +176,6 @@ function ManagementContent(props: ManagementPageProps) {
     && (skillFilter === 'all' || (skillFilter === 'ready' ? skill.eligible && !skill.disabled : !skill.eligible || skill.disabled)));
   const filteredPlugins = (plugins?.plugins || []).filter(plugin => `${plugin.name} ${plugin.id} ${plugin.description}`.toLowerCase().includes(query));
   const knownApis = apiTypes.includes(provider.api) ? apiTypes : [provider.api, ...apiTypes];
-  const persistedModelCount = settings?.providers.find(item => item.id === providerId)?.models.length || 0;
   const modelChoices = [...models];
   for (const id of [sessionModel, defaultModel]) {
     if (id && !modelChoices.some(model => model.id === id)) modelChoices.push({ id, name: id, provider: '' });
@@ -180,7 +210,17 @@ function ManagementContent(props: ManagementPageProps) {
         <section className="management-card"><div className="management-card-heading"><h3>默认模型</h3><span className="management-badge">全局配置</span></div><p className="management-help">用于未单独指定模型的对话。保存后可能需要网关重新加载。</p><form onSubmit={event => { event.preventDefault(); if (settings) void mutate('保存默认模型', () => window.kuro.saveModelSettings({ hash: settings.hash, defaultModel: defaultModel.trim() }), load); }}><div className="management-field"><label htmlFor="default-model">默认模型 ID</label><div className="management-inline"><input id="default-model" className="settings-input" list="management-model-options" placeholder="例如 openai/gpt-4.1" required value={defaultModel} disabled={disabled || sessionBusy || !settings} onChange={event => setDefaultModel(event.target.value)} /><datalist id="management-model-options">{modelChoices.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist><button className="primary-button" disabled={disabled || sessionBusy || !settings || !defaultModel.trim()}>保存默认模型</button></div></div></form></section>
 
         <section className="management-card"><div className="management-card-heading"><h3>模型服务</h3><span className="management-badge">API 配置</span></div><p className="management-help">填写服务地址与模型 ID。密钥不会回显，编辑已有服务时留空保留原密钥。</p><div className="management-field"><label htmlFor="provider-select">选择服务</label><select id="provider-select" className="settings-input" value={providerId} disabled={disabled || sessionBusy || !settings} onChange={event => selectProvider(event.target.value)}><option value="">＋ 添加模型服务</option>{settings?.providers.map(item => <option key={item.id} value={item.id}>{item.id}</option>)}</select></div>
-          <form onSubmit={saveProvider}><fieldset disabled={disabled || sessionBusy || !settings} className="management-fieldset"><div className="management-two-columns"><div className="management-field"><label htmlFor="provider-id">服务 ID</label><input id="provider-id" className="settings-input" required pattern="[a-zA-Z0-9_.\-]+" placeholder="例如 my-provider" disabled={!!providerId} value={provider.id} onChange={event => setProvider({ ...provider, id: event.target.value })} /></div><div className="management-field"><label htmlFor="provider-api">API 类型</label><select id="provider-api" className="settings-input" value={provider.api} onChange={event => setProvider({ ...provider, api: event.target.value })}>{knownApis.map(api => <option key={api} value={api}>{api}</option>)}</select></div></div><div className="management-field"><label htmlFor="provider-url">服务地址</label><input id="provider-url" className="settings-input" type="url" required placeholder="https://api.example.com/v1" value={provider.baseUrl} onChange={event => setProvider({ ...provider, baseUrl: event.target.value })} /></div><div className="management-field"><label htmlFor="provider-key">API 密钥 <span>{provider.hasApiKey ? '已配置 · 留空保留' : '按服务要求填写'}</span></label><input id="provider-key" className="settings-input" type="password" autoComplete="new-password" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={provider.hasApiKey ? '••••••••（已配置）' : '输入 API key'} /></div><div className="management-model-list"><div className="management-model-list-title"><strong>服务提供的模型</strong><button type="button" className="text-button" onClick={() => setProvider({ ...provider, models: [...provider.models, { id: '', name: '' }] })}><Plus size={14} />添加模型</button></div><p className="management-help">已有模型保留，可修改显示名称或追加新模型。</p>{provider.models.map((model, index) => <div className="management-model-row" key={index}><input className="settings-input" required readOnly={index < persistedModelCount} aria-label={`模型 ${index + 1} ID`} placeholder="模型 ID，例如 gpt-4.1" value={model.id} onChange={event => setProvider({ ...provider, models: provider.models.map((item, position) => position === index ? { ...item, id: event.target.value } : item) })} /><input className="settings-input" aria-label={`模型 ${index + 1} 名称`} placeholder="显示名称（可选）" value={model.name} onChange={event => setProvider({ ...provider, models: provider.models.map((item, position) => position === index ? { ...item, name: event.target.value } : item) })} /><button className="management-icon-button" type="button" disabled={provider.models.length < 2 || index < persistedModelCount} aria-label={`移除模型 ${index + 1}`} onClick={() => setProvider({ ...provider, models: provider.models.filter((_, position) => position !== index) })}><Trash2 size={16} /></button></div>)}</div><div className="management-card-footer"><button className="primary-button" disabled={!provider.id.trim() || !provider.models.length}><Check size={14} />保存服务配置</button></div></fieldset></form>
+          <form onSubmit={saveProvider}><fieldset disabled={disabled || sessionBusy || !settings} className="management-fieldset"><div className="management-two-columns"><div className="management-field"><label htmlFor="provider-id">服务 ID</label><input id="provider-id" className="settings-input" required pattern="[a-zA-Z0-9_.\-]+" placeholder="例如 my-provider" disabled={!!providerId} value={provider.id} onChange={event => setProvider({ ...provider, id: event.target.value })} /></div><div className="management-field"><label htmlFor="provider-api">API 类型</label><select id="provider-api" className="settings-input" value={provider.api} onChange={event => setProvider({ ...provider, api: event.target.value })}>{knownApis.map(api => <option key={api} value={api}>{api}</option>)}</select></div></div><div className="management-field"><label htmlFor="provider-url">服务地址</label><input id="provider-url" className="settings-input" type="url" required placeholder="https://api.example.com/v1" value={provider.baseUrl} onChange={event => setProvider({ ...provider, baseUrl: event.target.value })} /></div><div className="management-field"><label htmlFor="provider-key">API 密钥 <span>{provider.hasApiKey ? '已配置 · 留空保留' : '按服务要求填写'}</span></label><input id="provider-key" className="settings-input" type="password" autoComplete="new-password" value={apiKey} onChange={event => setApiKey(event.target.value)} placeholder={provider.hasApiKey ? '••••••••（已配置）' : '输入 API key'} /></div><div className="management-model-list"><div className="management-model-list-title"><strong>服务提供的模型</strong><button type="button" className="text-button" onClick={() => setProvider({ ...provider, models: [...provider.models, { id: '', name: '' }] })}><Plus size={14} />添加模型</button></div><p className="management-help">已有模型可修改名称、标记删除或撤销；点击“保存服务配置”后生效。默认模型需先更改并保存后才能删除。</p>{provider.models.map((model, index) => {
+              const removed = !!model.persisted && removeModelIds.includes(model.id);
+              const protectedDefault = !!model.persisted && isSavedDefault(model.id);
+              return <div className={`management-model-row${removed ? ' is-removed' : ''}`} key={index}>
+                <input className="settings-input" required readOnly={!!model.persisted} disabled={removed} aria-label={`模型 ${index + 1} ID`} placeholder="模型 ID，例如 gpt-4.1" value={model.id} onChange={event => setProvider({ ...provider, models: provider.models.map((item, position) => position === index ? { ...item, id: event.target.value } : item) })} />
+                <input className="settings-input" disabled={removed} aria-label={`模型 ${index + 1} 名称`} placeholder="显示名称（可选）" value={model.name} onChange={event => setProvider({ ...provider, models: provider.models.map((item, position) => position === index ? { ...item, name: event.target.value } : item) })} />
+                <button className="management-icon-button" type="button" disabled={protectedDefault && !removed} aria-label={`${removed ? '撤销删除模型' : '移除模型'} ${index + 1}`} title={removed ? '撤销删除' : protectedDefault ? '请先更改并保存默认模型' : model.persisted ? '标记删除，保存后生效' : '移除未保存的模型'} onClick={() => removeModel(index)}>{removed ? <Undo2 size={16} /> : <Trash2 size={16} />}</button>
+                {(removed || protectedDefault) && <span className="management-model-status">{removed ? '待删除 · 保存后生效，可撤销' : '默认模型 · 请先更改并保存默认模型'}</span>}
+              </div>;
+            })}
+            {!!removeModelIds.length && <p className="management-help" role="status">已标记删除 {removeModelIds.length} 个模型，保存服务配置后生效。</p>}</div><div className="management-card-footer"><button className="primary-button" disabled={!provider.id.trim() || (!provider.models.length && !removeModelIds.length)}><Check size={14} />保存服务配置</button></div></fieldset></form>
         </section>
       </div>}
 

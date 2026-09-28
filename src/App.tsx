@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowDown, ArrowRight, ArrowUp, Boxes, Check, ChevronRight, CircleHelp, Code2, Coffee, Compass, Cpu, ExternalLink, Flower2, Heart, LoaderCircle, MessageCircle, Plus, Radio, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Square, Unplug, Wifi, WifiOff, Wrench, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -7,6 +7,7 @@ import type { ChatMessage, ConnectionStatus, PublicSettings, Session, SettingsIn
 import { errorText, useWorkspace } from './useWorkspace';
 import { Companion } from './live2d/Companion';
 import { ManagementPage } from './Management';
+import { useStreamingText } from './useStreamingText';
 
 const titleOf = (session?: Session) => session?.displayName || session?.derivedTitle || session?.label || (session ? session.key : '新的对话');
 const stateLabel = (status: ConnectionStatus) => ({ connected: '已连接', connecting: '连接中', disconnected: '未连接', error: '连接异常' })[status.state];
@@ -19,14 +20,15 @@ const suggestions = [
 function Avatar({ small = false }: { small?: boolean }) { return <span className={`avatar ${small ? 'avatar-small' : ''}`}><img src={mascot} alt="库洛" /></span>; }
 function Status({ status }: { status: ConnectionStatus }) { return <span className={`status status-${status.state}`}><i />{stateLabel(status)}</span>; }
 function EmptyNotice({ text, retry }: { text: string; retry?: () => void }) { return <div className="empty-notice"><MessageCircle size={25} /><p>{text}</p>{retry && <button className="text-button" onClick={retry}>再试一次 <RefreshCw size={13} /></button>}</div>; }
-function MarkdownMessage({ message, onError }: { message: ChatMessage; onError: (text: string) => void }) {
+const MarkdownMessage = memo(function MarkdownMessage({ message, streaming, onReveal, onError }: { message: ChatMessage; streaming: boolean; onReveal: () => void; onError: (text: string) => void }) {
   const content = typeof message.content === 'string' ? message.content : message.content.filter(block => block.type === 'text' && typeof block.text === 'string').map(block => block.text).join('\n\n');
+  const visibleContent = useStreamingText(content, streaming, onReveal);
   const tools = typeof message.content === 'string' ? [] : message.content.filter(block => block.type === 'tool_use' || block.type === 'toolCall');
   return <><div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{
     a: ({ href, children }) => <a href={href} onClick={event => { event.preventDefault(); if (href && /^https?:\/\//i.test(href)) void window.kuro.openExternal(href).catch(error => onError(errorText(error))); }} rel="noreferrer">{children}<ExternalLink size={11} /></a>,
     img: ({ alt }) => <span className="image-placeholder">[图片{alt ? `：${alt}` : ''}]</span>,
-  }}>{content || (message.role === 'toolResult' || message.role === 'tool' ? '工具已返回结果。' : '')}</ReactMarkdown></div>{tools.map((tool, index) => <div className="tool-message" key={index}><Wrench size={13} />调用工具 · {tool.name || '工具'}</div>)}</>;
-}
+  }}>{visibleContent || (message.role === 'toolResult' || message.role === 'tool' ? '工具已返回结果。' : '')}</ReactMarkdown></div>{tools.map((tool, index) => <div className="tool-message" key={index}><Wrench size={13} />调用工具 · {tool.name || '工具'}</div>)}</>;
+});
 
 export default function App() {
   const work = useWorkspace();
@@ -35,6 +37,9 @@ export default function App() {
   const composer = useRef<HTMLTextAreaElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
+  const followReply = useCallback(() => {
+    if (follow.current && scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight;
+  }, []);
   const composing = useRef(false);
   const [showJump, setShowJump] = useState(false);
   const current = work.current;
@@ -97,7 +102,7 @@ export default function App() {
             {current.messages.length >= 200 && <div className="history-limit">显示最近 200 条记录</div>}
             {shownMessages.map((message, index) => <article className={`message message-${message.role === 'user' ? 'user' : 'assistant'}`} key={message.id || `${index}-${message.role}`}>
               {message.role !== 'user' && <Avatar small />}
-              <div className="message-body"><div className="message-meta"><strong>{message.role === 'user' ? '你' : message.role === 'toolResult' || message.role === 'tool' ? message.toolName || '工具结果' : '库洛'}</strong>{message.role !== 'user' && <span>KURO</span>}{message.timestamp && <time>{formatTime(message.timestamp)}</time>}</div><div className="message-bubble"><MarkdownMessage message={message} onError={work.setNotice} /></div></div>
+              <div className="message-body"><div className="message-meta"><strong>{message.role === 'user' ? '你' : message.role === 'toolResult' || message.role === 'tool' ? message.toolName || '工具结果' : '库洛'}</strong>{message.role !== 'user' && <span>KURO</span>}{message.timestamp && <time>{formatTime(message.timestamp)}</time>}</div><div className="message-bubble"><MarkdownMessage message={message} streaming={message === current.stream} onReveal={followReply} onError={work.setNotice} /></div></div>
             </article>)}
             {current.run && <div className="run-activity" role="status"><span className="thinking-dots"><i /><i /><i /></span><span>{current.activity || (current.run.stopping ? '正在等待停止确认…' : current.stream ? '库洛正在写下回复…' : '库洛正在认真思考…')}</span></div>}
           </div>}

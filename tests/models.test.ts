@@ -90,3 +90,133 @@ test('existing provider URLs omit embedded credentials, queries and fragments be
   snapshot.config.models.providers.acme.baseUrl = 'not-a-url-secret';
   assert.equal((await manager.getModelSettings()).providers[0].baseUrl, '');
 });
+
+test('explicit deletion emits the remaining provider models while supporting rename and append', async () => {
+  const { manager, calls, snapshot } = fixture();
+  snapshot.config.models.providers.acme.models.push({ id: 'remove-me', name: 'Remove me' });
+  const before = structuredClone(snapshot);
+  await manager.saveModelSettings({ hash: 'hash-v1', provider: {
+    id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions',
+    models: [{ id: 'old', name: ' Renamed ' }, { id: 'new', name: 'New' }],
+    removeModelIds: ['remove-me'],
+  } });
+  assert.deepEqual(calls.map(call => call.method), ['config.get', 'config.patch']);
+  assert.equal(calls[1].params.baseHash, 'hash-v1');
+  const patch = JSON.parse(calls[1].params.raw);
+  assert.deepEqual(patch, {
+    models: { providers: { acme: {
+      baseUrl: 'https://api.example.com/v1', api: 'openai-completions',
+      models: [{ id: 'old', name: 'Renamed', contextWindow: 12345 }, { id: 'untouched', name: 'Untouched' }, { id: 'new', name: 'New' }],
+    } } },
+    agents: { defaults: { models: { 'acme/new': {} } } },
+  });
+  assert.deepEqual(snapshot, before);
+});
+
+test('deletion-only save can remove the last model without removing the provider', async () => {
+  const { manager, calls, snapshot } = fixture();
+  snapshot.config.agents.defaults.model.primary = 'other/default';
+  await manager.saveModelSettings({ hash: 'hash-v1', provider: {
+    id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions',
+    models: [], removeModelIds: ['old', 'untouched'],
+  } });
+  const patch = JSON.parse(calls[1].params.raw);
+  assert.deepEqual(patch.models.providers.acme, {
+    baseUrl: 'https://api.example.com/v1', api: 'openai-completions', models: [],
+  });
+  assert.equal(patch.agents, undefined);
+});
+
+test('deletion refuses the current default in string and object forms before writing', async () => {
+  for (const model of ['acme/old', { primary: 'acme/old', fallbacks: ['other/backup'] }]) {
+    const { calls, snapshot, manager } = fixture();
+    (snapshot.config.agents.defaults as { model: unknown }).model = model;
+    await assert.rejects(manager.saveModelSettings({ hash: 'hash-v1', defaultModel: 'other/default', provider: {
+      id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions',
+      models: [{ id: 'new', name: 'New' }], removeModelIds: ['old'],
+    } }), /默认模型/);
+    assert.deepEqual(calls.map(call => call.method), ['config.get']);
+  }
+});
+
+test('deletion cannot create a dangling new default in the same save', async () => {
+  const { manager, calls } = fixture();
+  await assert.rejects(manager.saveModelSettings({ hash: 'hash-v1', defaultModel: 'acme/untouched', provider: {
+    id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions',
+    models: [{ id: 'new', name: 'New' }], removeModelIds: ['untouched'],
+  } }), /默认模型/);
+  assert.equal(calls.some(call => call.method === 'config.patch'), false);
+});
+
+test('default protection compares the complete provider/model ID', async () => {
+  const { manager, calls, snapshot } = fixture();
+  snapshot.config.agents.defaults.model.primary = 'other/old';
+  await manager.saveModelSettings({ hash: 'hash-v1', provider: {
+    id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions',
+    models: [], removeModelIds: ['old'],
+  } });
+  assert.deepEqual(JSON.parse(calls[1].params.raw).models.providers.acme.models, [{ id: 'untouched', name: 'Untouched' }]);
+});
+
+test('invalid deletion lists and simultaneous update/delete of one ID never reach the gateway', async () => {
+  for (const removeModelIds of [null, 'untouched', [null], [''], ['bad id'], ['__proto__'], ['untouched', 'untouched'], Array.from({ length: 301 }, (_, i) => `m${i}`), ['new']]) {
+    const { manager, calls } = fixture();
+    await assert.rejects(manager.saveModelSettings({ hash: 'hash-v1', provider: {
+      id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions',
+      models: [{ id: 'new', name: 'New' }], removeModelIds: removeModelIds as any,
+    } }));
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('an empty update list still requires an explicit deletion', async () => {
+  for (const removeModelIds of [undefined, []]) {
+    const { manager, calls } = fixture();
+    await assert.rejects(manager.saveModelSettings({ hash: 'hash-v1', provider: {
+      id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions', models: [], removeModelIds,
+    } }));
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('deletion with a stale hash never writes config', async () => {
+  const { manager, calls } = fixture();
+  await assert.rejects(manager.saveModelSettings({ hash: 'stale', provider: {
+    id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions', models: [], removeModelIds: ['untouched'],
+  } }), /变更|刷新/);
+  assert.deepEqual(calls.map(call => call.method), ['config.get']);
+});
+
+test('deletion requires the model to exist in the specified provider', async () => {
+  for (const id of ['acme', 'missing-provider']) {
+    const { manager, calls } = fixture();
+    await assert.rejects(manager.saveModelSettings({ hash: 'hash-v1', provider: {
+      id, baseUrl: 'https://api.example.com/v1', api: 'openai-completions',
+      models: [{ id: 'new', name: 'New' }], removeModelIds: ['missing-model'],
+    } }), /不存在/);
+    assert.deepEqual(calls.map(call => call.method), ['config.get']);
+  }
+});
+
+test('deletion reports read, permission, concurrent-write and malformed patch failures', async () => {
+  const { snapshot } = fixture();
+  for (const failure of [
+    { method: 'config.get', error: new Error('read failed secret-123'), pattern: /模型操作失败/ },
+    { method: 'config.patch', error: new Error('missing scope operator.admin secret-123'), pattern: /管理权限/ },
+    { method: 'config.patch', error: new Error('base hash mismatch secret-123'), pattern: /变更|刷新/ },
+    { method: 'config.patch', error: new Error('write failed secret-123'), pattern: /模型操作失败/ },
+    { method: 'config.patch', result: { ok: false }, pattern: /模型操作失败/ },
+    { method: 'config.patch', result: undefined, pattern: /模型操作失败/ },
+  ]) {
+    const calls: string[] = [];
+    const manager = createModelManager(async <T>(method: string): Promise<T> => {
+      calls.push(method);
+      if (method === failure.method && failure.error) throw failure.error;
+      return (method === 'config.get' ? snapshot : failure.result) as T;
+    });
+    await assert.rejects(manager.saveModelSettings({ hash: 'hash-v1', provider: {
+      id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions', models: [], removeModelIds: ['untouched'],
+    } }), error => error instanceof Error && failure.pattern.test(error.message) && !error.message.includes('secret-123'));
+    assert.deepEqual(calls, failure.method === 'config.get' ? ['config.get'] : ['config.get', 'config.patch']);
+  }
+});

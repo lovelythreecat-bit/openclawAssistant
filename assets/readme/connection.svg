@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">Kuro and OpenClaw — typical WSL connection</title>
+  <desc id="desc">Kuro on Windows connects to the OpenClaw gateway in WSL over a loopback WebSocket. The gateway calls the configured model service, which may be local or remote.</desc>
+  <rect width="1200" height="300" rx="24" fill="#fffaf7"/>
+  <g font-family="Segoe UI, Microsoft YaHei, sans-serif">
+    <text x="56" y="49" font-size="20" font-weight="600" letter-spacing="2" fill="#936174">ONE DESKTOP. YOUR OPENCLAW.</text>
+    <g id="desktop">
+      <rect x="56" y="100" width="260" height="140" rx="16" fill="#fce9ef"/>
+      <text x="80" y="138" font-size="20" fill="#936174">WINDOWS</text>
+      <text x="80" y="181" font-size="36" font-weight="650" fill="#453740">Kuro</text>
+      <text x="80" y="213" font-size="21" fill="#715562">Chat · models · skills</text>
+    </g>
+    <g id="gateway">
+      <rect x="469" y="100" width="284" height="140" rx="16" fill="#fce9ef"/>
+      <text x="493" y="138" font-size="20" fill="#936174">WSL</text>
+      <text x="493" y="181" font-size="36" font-weight="650" fill="#453740">OpenClaw</text>
+      <text x="493" y="213" font-size="21" fill="#715562">Gateway · tools</text>
+    </g>
+    <g id="model">
+      <rect x="904" y="100" width="240" height="140" rx="16" fill="#ffffff" stroke="#ecd8e0" stroke-width="2"/>
+      <text x="928" y="138" font-size="20" fill="#936174">CONFIGURED</text>
+      <text x="928" y="181" font-size="36" font-weight="650" fill="#453740">Model</text>
+      <text x="928" y="213" font-size="21" fill="#715562">Local or remote</text>
+    </g>
+    <g id="connections" fill="#715562" font-size="20" text-anchor="middle">
+      <text x="392" y="141">Loopback</text>
+      <text x="392" y="207">WebSocket</text>
+      <text x="828" y="141">Model calls</text>
+      <path d="M334 170 H449 M439 163 L449 170 L439 177 M771 170 H884 M874 163 L884 170 L874 177" fill="none" stroke="#c95978" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>

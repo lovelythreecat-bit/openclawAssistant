@@ -94,6 +94,53 @@ test('final sharing the last delta sequence clears writing indicators and allows
   } finally { await page.close(); }
 });
 
+test('large chat snapshots reveal across frames, preserve prefixes, and flush on completion', async () => {
+  const page = await openWorkspace();
+  try {
+    await page.evaluate(() => {
+      const f = (window as any).fixture;
+      window.kuro.send = async input => { f.sessionKey = input.sessionKey; f.runId = input.idempotencyKey; return { runId: input.idempotencyKey }; };
+      // Keep the terminal message visible while the history RPC is pending.
+      f.deferHistory = true;
+      f.frames = new Map(); f.frameId = 0; f.now = performance.now();
+      window.requestAnimationFrame = callback => { const id = ++f.frameId; f.frames.set(id, callback); return id; };
+      window.cancelAnimationFrame = id => { f.frames.delete(id); };
+      f.step = (ms: number) => { f.now += ms; const frames = [...f.frames.values()]; f.frames.clear(); frames.forEach((callback: any) => callback(f.now)); };
+    });
+    await page.locator('textarea').fill('请逐步回复');
+    await page.getByRole('button', { name: '发送消息', exact: true }).click();
+    await page.waitForFunction(() => !!(window as any).fixture.runId, { }, { polling: 10 });
+    const text = '这是一段需要平滑展示的回复。'.repeat(30);
+    const emit = async (content: string, seq: number, state = 'delta') => {
+      await page.evaluate(({ content, seq, state }) => {
+        const f = (window as any).fixture;
+        f.emitChat({ sessionKey: f.sessionKey, runId: f.runId, seq, state, message: { role: 'assistant', content } });
+      }, { content, seq, state });
+    };
+    const bubble = page.locator('.message-assistant .markdown');
+    await emit(text, 1);
+    await bubble.waitFor({ state: 'attached' });
+    assert.notEqual(await bubble.innerText(), text, 'a whole snapshot must not appear in one render');
+    await page.evaluate(() => (window as any).fixture.step(16));
+    await page.evaluate(() => (window as any).fixture.step(32));
+    const partial = await bubble.innerText();
+    assert.ok(partial.length > 0 && partial.length < text.length);
+    assert.ok(text.startsWith(partial));
+    await emit(text + '后续内容。'.repeat(20), 2);
+    assert.ok((await bubble.innerText()).startsWith(partial), 'new snapshots must not restart the displayed prefix');
+    await page.evaluate(() => (window as any).fixture.step(250));
+    await page.evaluate(() => (window as any).fixture.step(250));
+    assert.equal(await bubble.innerText(), text + '后续内容。'.repeat(20), 'a paused stream must drain without another packet');
+    await emit('网关修正后的文本', 3);
+    assert.equal(await bubble.innerText(), '网关修正后的文本', 'replacement snapshots must not retain an unrelated prefix');
+    await emit('完整的最终回复。', 3, 'final');
+    await page.getByRole('button', { name: '发送消息', exact: true }).waitFor();
+    assert.equal(await bubble.innerText(), '完整的最终回复。');
+    await page.evaluate(() => (window as any).fixture.step(250));
+    assert.equal(await bubble.innerText(), '完整的最终回复。', 'queued frames must not overwrite the terminal result');
+  } finally { await page.close(); }
+});
+
 test('manual password preserves whitespace, sends password without token, and clears on save', async () => {
   const page = await openWorkspace();
   try {

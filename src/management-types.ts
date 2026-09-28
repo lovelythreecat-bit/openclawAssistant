@@ -20,7 +20,16 @@ export interface ModelSettings { hash: string; defaultModel: string; providers: 
 export interface SaveModelSettingsInput {
   hash: string;
   defaultModel?: string;
-  provider?: { id: string; baseUrl: string; api: string; apiKey?: string; models: ProviderModel[] };
+  provider?: {
+    id: string;
+    baseUrl: string;
+    api: string;
+    apiKey?: string;
+    /** Models to rename or append; may be empty for a deletion-only save. */
+    models: ProviderModel[];
+    /** Existing IDs in this provider to remove. Switch the current default first. */
+    removeModelIds?: string[];
+  };
 }
 export interface PluginInfo {
   id: string;

@@ -62,6 +62,8 @@
 .management-model-list-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .management-model-list-title strong { color: #89667f; font-size: 12px; font-weight: 550; }
 .management-model-row { display: grid; grid-template-columns: 1fr 1fr 30px; gap: 9px; align-items: center; margin-top: 9px; }
+.management-model-row.is-removed > input { text-decoration: line-through; }
+.management-model-status { grid-column: 1 / -1; color: #a66479; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .management-icon-button { display: grid; place-items: center; color: #b088a0; width: 30px; height: 34px; border-radius: 6px; }
 .management-icon-button:hover:not(:disabled) { background: #faeaf1; color: #b16b8d; }
 .management-card-footer { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 20px; }

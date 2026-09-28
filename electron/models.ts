@@ -80,6 +80,7 @@ export function createModelManager(request: GatewayRequest) {
       if (input.defaultModel === undefined && input.provider === undefined) throw new Error('没有需要保存的模型配置。');
       if (input.defaultModel !== undefined) identifier(input.defaultModel, '默认模型');
       const provider = input.provider;
+      const removals = new Set<string>();
       if (provider !== undefined) {
         if (!provider || typeof provider !== 'object') throw new Error('提供商配置格式不正确。');
         identifier(provider.id, '提供商', true);
@@ -88,10 +89,19 @@ export function createModelManager(request: GatewayRequest) {
         if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || provider.baseUrl.length > 4096) throw new Error('模型 API 地址必须是无凭据的 HTTP 或 HTTPS 地址。');
         if (!APIS.has(provider.api)) throw new Error('不支持此模型 API 类型。');
         if (provider.apiKey !== undefined && (typeof provider.apiKey !== 'string' || provider.apiKey.length > 16384 || /[\x00-\x1f\x7f]/.test(provider.apiKey))) throw new Error('模型 API Key 格式不正确。');
-        if (!Array.isArray(provider.models) || !provider.models.length || provider.models.length > 300) throw new Error('请填写 1 至 300 个模型。');
+        if (provider.removeModelIds !== undefined) {
+          if (!Array.isArray(provider.removeModelIds) || provider.removeModelIds.length > 300) throw new Error('待删除模型列表格式不正确。');
+          for (const id of provider.removeModelIds) {
+            identifier(id, '待删除模型');
+            if (removals.has(id)) throw new Error('待删除模型 ID 重复。');
+            removals.add(id);
+          }
+        }
+        if (!Array.isArray(provider.models) || (!provider.models.length && !removals.size) || provider.models.length > 300) throw new Error('请填写 1 至 300 个模型，或指定待删除模型。');
         const seen = new Set<string>();
         for (const model of provider.models) {
           identifier(model?.id, '模型');
+          if (removals.has(model.id)) throw new Error('不能同时更新和删除同一个模型。');
           if (typeof model.name !== 'string' || !model.name.trim() || model.name.length > 300 || /[\x00-\x1f\x7f]/.test(model.name) || seen.has(model.id)) throw new Error('模型名称无效或模型 ID 重复。');
           seen.add(model.id);
         }
@@ -108,7 +118,15 @@ export function createModelManager(request: GatewayRequest) {
       }
       if (provider) {
         const existing = object(object(object(config.models).providers)[provider.id]);
-        const models = Array.isArray(existing.models) ? existing.models.map((model: unknown) => ({ ...object(model) })) : [];
+        const existingModels = Array.isArray(existing.models) ? existing.models : [];
+        const currentDefault = typeof defaults.model === 'string' ? defaults.model : text(object(defaults.model).primary);
+        for (const id of removals) {
+          const canonical = `${provider.id}/${id}`;
+          if (canonical === currentDefault || canonical === input.defaultModel) throw new Error('不能删除默认模型，请先更改并保存默认模型。');
+          if (!existingModels.some((model: unknown) => object(model).id === id)) throw new Error('待删除模型在此提供商中不存在，请刷新后重试。');
+        }
+        // config.patch replaces arrays: send all survivors, including their metadata.
+        const models = existingModels.filter((model: unknown) => !removals.has(object(model).id)).map((model: unknown) => ({ ...object(model) }));
         for (const model of provider.models) {
           const index = models.findIndex((entry: ObjectValue) => entry.id === model.id);
           if (index < 0) models.push({ id: model.id, name: model.name.trim() });
