@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">库洛 Kuro — OpenClaw Desktop</title>
+  <desc id="desc">A warm pink and ivory title for Kuro, a Windows desktop companion for OpenClaw. A conversation motif reflects its chat workspace.</desc>
+  <rect width="1200" height="300" rx="24" fill="#fffaf7"/>
+  <g id="identity" font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif">
+    <text x="60" y="63" font-size="21" font-weight="600" letter-spacing="3" fill="#936174">OPENCLAW DESKTOP</text>
+    <text x="56" y="163" font-size="82" font-weight="700" fill="#453740">库洛<tspan dx="24" font-weight="400" fill="#c95978">Kuro</tspan></text>
+    <text x="60" y="222" font-size="29" fill="#715562">A little company. A place for your ideas.</text>
+    <text x="60" y="266" font-size="20" fill="#936174">WINDOWS  ·  LOCAL GATEWAY  ·  LIVE2D</text>
+  </g>
+  <g id="conversation" stroke="#df819b" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M902 58 H1080 Q1100 58 1100 78 V137 Q1100 157 1080 157 H969 L941 180 V157 H902 Q882 157 882 137 V78 Q882 58 902 58Z" fill="#fce9ef"/>
+    <path d="M964 189 H1108 Q1128 189 1128 209 V238 Q1128 255 1110 255 H1082 V272 L1059 255 H964 Q946 255 946 237 V207 Q946 189 964 189Z" fill="#ffffff" stroke="#ecd8e0"/>
+    <path d="M915 97 H1011 M915 120 H1063 M974 223 H1068"/>
+  </g>
+</svg>

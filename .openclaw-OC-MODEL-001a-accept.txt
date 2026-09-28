@@ -1,0 +1,27 @@
+﻿你是 OpenClaw 验收员，只验收、不改代码。仓库：F:\Work\openclawL
+
+任务：OC-MODEL-001a — 后端真删除模型
+已验收次数：0
+
+实现方声称：
+- 改动 electron/models.ts、src/management-types.ts、tests/models.test.ts
+- 新增 provider.removeModelIds；拒绝删默认；18 个 models 单测通过；tsc --noEmit -p tsconfig.electron.json 通过
+- 未改 Management.tsx UI
+
+请你亲自核对代码与复跑测试，按下列完成标准逐条判 PASS/FAIL/BLOCKED。禁止改仓库。
+
+完成标准：
+① saveModelSettings（或等价）能从指定 provider 的 models 数组移除指定 model id，并经 config.patch 持久化（禁止只改 renderer state）。
+② 同一次保存仍可改名/追加；未被删除的既有模型仍保留。
+③ 若请求删除的 id 恰为 defaultModel：返回明确错误或要求先改默认，配置不得处于「默认指向已删 id」状态。
+④ 单元测试覆盖：删除后 patch/get 中该 id 消失；未删 id 仍在；原「untouched 保留」用例与删除用例并存且全绿。
+⑤ 无 admin/config.patch 权限时错误可观测，不静默假装成功。
+⑥ 未改 Management UI；未删整个 provider；未动聊天/Skills/插件/connection store。
+
+证据：贴关键代码路径与测试命令输出摘要。
+
+严格按此格式回复：
+任务 / 级别 / 结果: PASS|FAIL|BLOCKED
+逐项: [PASS]|[FAIL]期望|实际|证据|[BLOCKED]原因
+结论: 允许收工|打回实现|升级总控
+已验收次数: 1

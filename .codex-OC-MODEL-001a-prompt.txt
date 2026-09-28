@@ -1,0 +1,25 @@
+﻿仓库: F:\Work\openclawL（kuro-openclaw-desktop）
+
+任务卡: OC-MODEL-001a — 后端真删除模型
+
+目标:
+当前 electron/models.ts 的 saveModelSettings 对 provider.models 只 merge/append，从不删除。
+请实现「从指定 provider 移除指定 model id」的持久化删除，经现有 config.get + config.patch（baseHash 乐观锁）写回。
+
+必须改动的方向（按实际结构取舍，保持类型与 IPC 一致）:
+- electron/models.ts（核心）
+- 若需新字段：management-types / DesktopBridge / preload / main 的 save 入参
+- tests/models.test.ts
+
+行为要求:
+1. 可删除 provider.models 中已存在的 model id，patch 后配置里不再出现。
+2. 同一次保存仍支持改名与追加；未点名删除的模型必须保留。
+3. 若删除目标 == 当前 defaultModel：拒绝或要求先改默认，禁止留下悬空默认。
+4. 无权限/patch 失败时抛出可观测错误，禁止静默成功。
+5. 不要改 Management.tsx UI（那是下一张卡 OC-MODEL-001b）。
+6. 不要删除整个 provider；不要动聊天、Skills、插件、connection store。
+
+验收将由另一模型按完成标准逐条判 PASS/FAIL；你不要自称已验收。
+做完后列出改动文件与如何跑 tests/models.test.ts，并实际跑通相关单测。
+
+只实现，不验收。完成后用清晰中文总结：改了什么、测试命令与结果。
