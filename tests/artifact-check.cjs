@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const asar = require('@electron/asar');
 const archive=path.resolve('release/win-unpacked/resources/app.asar');
-for(const name of ['dist/index.html','dist-electron/electron/main.js','dist-electron/electron/gateway.js','dist-electron/electron/store.js','dist-electron/electron/models.js','dist-electron/electron/plugins.js','dist-electron/electron/skills.js','electron/preload.cjs','assets/concepts/mascot-welcome-v1.png']) {
+for(const name of ['dist/index.html','dist-electron/electron/main.js','dist-electron/electron/gateway.js','dist-electron/electron/store.js','dist-electron/electron/models.js','dist-electron/electron/plugins.js','dist-electron/electron/skills.js','electron/preload.cjs','assets/concepts/shizuku-icon.png']) {
   const packaged=asar.extractFile(archive,path.normalize(name));
   assert.equal(packaged.equals(fs.readFileSync(name)),true,`${name} must match final source build`);
 }

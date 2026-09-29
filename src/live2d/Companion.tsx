@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Hand, LoaderCircle, RefreshCw } from 'lucide-react';
-import type { CompanionRenderer } from './renderer';
+import type { CompanionAction, CompanionRenderer } from './renderer';
 import './companion.css';
 
 const storageKey = 'kuro.companion.collapsed';
-export function Companion({ thinking, replying }: { thinking: boolean; replying: boolean }) {
+export function Companion() {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem(storageKey) === 'true'; } catch { return false; }
   });
@@ -12,6 +12,7 @@ export function Companion({ thinking, replying }: { thinking: boolean; replying:
   const [motion, setMotion] = useState('Idle');
   const [retry, setRetry] = useState(0);
   const [greeting, setGreeting] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
   const host = useRef<HTMLDivElement>(null);
   const renderer = useRef<CompanionRenderer | undefined>(undefined);
 
@@ -22,6 +23,7 @@ export function Companion({ thinking, replying }: { thinking: boolean; replying:
     let current: CompanionRenderer | undefined;
     setState('loading');
     setMotion('Idle');
+    setGreeting(false);
     const failed = (error: unknown) => {
       if (!cancelled) { console.warn('Live2D companion:', error); setState('error'); }
     };
@@ -31,6 +33,7 @@ export function Companion({ thinking, replying }: { thinking: boolean; replying:
         ready: () => { if (!cancelled) setState('ready'); },
         error: failed,
         motion: name => { if (!cancelled) setMotion(name); },
+        reducedMotion: value => { if (!cancelled) setReducedMotion(value); },
       });
       renderer.current = current;
     }).catch(failed);
@@ -45,24 +48,27 @@ export function Companion({ thinking, replying }: { thinking: boolean; replying:
     setCollapsed(next);
     try { localStorage.setItem(storageKey, String(next)); } catch { /* Storage is optional. */ }
   };
-  const greet = async () => {
+  const interact = async (action: CompanionAction) => {
     if (greeting) return;
     setGreeting(true);
-    await renderer.current?.greet();
+    await renderer.current?.interact(action);
     setGreeting(false);
   };
+  const interactionDisabled = state !== 'ready' || greeting || motion !== 'Idle' || reducedMotion;
 
   if (collapsed) return <aside className="companion-collapsed" aria-label="聊天陪伴">
     <button onClick={toggle} aria-label="展开角色" title="展开角色"><ChevronLeft size={15} /><span>陪伴</span></button>
   </aside>;
 
   return <aside className="companion-panel" aria-label="聊天陪伴" data-live2d-state={state} data-live2d-motion={motion}>
-    <header className="companion-heading"><div><span>在你身边</span><strong>Shizuku</strong></div><button className="icon-button" onClick={toggle} aria-label="收起角色" title="收起角色"><ChevronRight size={17} /></button></header>
+    <header className="companion-heading"><strong title="Shizuku · © Live2D Inc.">Shizuku</strong><button className="icon-button" onClick={toggle} aria-label="收起角色" title="收起角色"><ChevronRight size={17} /></button></header>
     <div className="companion-scene">
-      <div ref={host} className="live2d-stage" role="img" aria-label="Shizuku 动态陪伴角色" onClick={() => { if (state === 'ready') void greet(); }} />
+      <div ref={host} className="live2d-stage" role="img" aria-label="Shizuku 动态陪伴角色" />
       {state === 'loading' && <div className="companion-placeholder" role="status"><LoaderCircle size={22} className="spin" /><span>Shizuku 正在准备…</span></div>}
       {state === 'error' && <div className="companion-placeholder" role="status"><span>角色暂时没能显示<br />你可以继续聊天</span><button className="text-button" onClick={() => { setState('loading'); setRetry(value => value + 1); }}><RefreshCw size={13} />重试加载角色</button></div>}
     </div>
-    <div className="companion-footer"><p aria-live="polite">{thinking ? replying ? '正在写下回复…' : '正在认真思考…' : '我在这里，慢慢说就好。'}</p><button className="secondary-button" disabled={state !== 'ready' || greeting} onClick={() => void greet()} aria-label="和 Shizuku 打招呼"><Hand size={14} />打个招呼</button><small>Shizuku · © Live2D Inc.</small></div>
+    <div className="companion-footer">
+      <button className="secondary-button" disabled={interactionDisabled} onClick={() => void interact('Tap')} aria-label="和 Shizuku 打招呼" title={reducedMotion ? '已按系统设置减少动态效果' : '和 Shizuku 打招呼'}><Hand size={14} />打个招呼</button>
+    </div>
   </aside>;
 }

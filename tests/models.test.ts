@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createModelManager } from '../electron/models.js';
+import { GatewayRequestError } from '../electron/gateway.js';
 
 function fixture() {
   const calls: { method: string; params: any }[] = [];
@@ -195,6 +196,20 @@ test('deletion requires the model to exist in the specified provider', async () 
       models: [{ id: 'new', name: 'New' }], removeModelIds: ['missing-model'],
     } }), /不存在/);
     assert.deepEqual(calls.map(call => call.method), ['config.get']);
+  }
+});
+
+test('invalid approval IDs fall back to device listing without exposing gateway error contents', async () => {
+  for (const requestId of [undefined, 'request; injected-command', '--latest', 'request\nsecret-key']) {
+    const manager = createModelManager(async () => {
+      throw new GatewayRequestError('scope upgrade pending approval secret-key', requestId);
+    });
+    await assert.rejects(manager.getModelSettings(), (error: Error) => {
+      assert.match(error.message, /openclaw devices list/);
+      assert.equal(error.message.includes('secret-key'), false);
+      assert.equal(error.message.includes('injected-command'), false);
+      return true;
+    });
   }
 });
 

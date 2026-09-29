@@ -24,11 +24,15 @@ export function useWorkspace() {
   const generation = useRef(0);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [modelSwitching, setModelSwitching] = useState(false);
+  const modelSwitchRequest = useRef(0);
+  const switchingModel = useRef(false);
   const listRequest = useRef(0);
   const historyRequest = useRef<Record<string, number>>({});
   const initialKey = useRef(selected);
   const resetWorkspace = useCallback(() => {
     generation.current++;
+    modelSwitchRequest.current++; switchingModel.current = false; setModelSwitching(false);
     listRequest.current++;
     historyRequest.current = {};
     const key = newKey();
@@ -138,6 +142,29 @@ export function useWorkspace() {
     setSelected(key);
     setLocalSessions(prior => [{ key, displayName: '新的对话', updatedAt: Date.now() }, ...prior]);
   };
+  const switchModel = async (model: string | null) => {
+    if (!window.kuro || switchingModel.current || statusRef.current.state !== 'connected'
+      || Object.values(stateRef.current).some(state => !!state.run)) return;
+    const key = selected;
+    const scope = generation.current;
+    const request = ++modelSwitchRequest.current;
+    switchingModel.current = true; setModelSwitching(true); setNotice('');
+    try {
+      await window.kuro.switchSessionModel({ sessionKey: key, model });
+      if (scope !== generation.current) return;
+      // Invalidate an older list request so it cannot undo this acknowledged choice.
+      listRequest.current++; setSessionLoading(false);
+      const changed = (session: Session): Session => session.key === key
+        ? { ...session, model: model || undefined, modelProvider: undefined } : session;
+      setSessions(prior => prior.map(changed));
+      setLocalSessions(prior => prior.some(session => session.key === key)
+        ? prior.map(changed) : [{ key, displayName: '新的对话', model: model || undefined }, ...prior]);
+    } catch (error) {
+      if (scope === generation.current) setNotice(`模型切换失败：${errorText(error)}`);
+    } finally {
+      if (request === modelSwitchRequest.current) { switchingModel.current = false; setModelSwitching(false); }
+    }
+  };
   const stopRun = async (key: string, requestId: string, scope: number) => {
     const isCurrent = () => scope === generation.current && stateRef.current[key]?.run?.requestedId === requestId;
     const run = stateRef.current[key]?.run;
@@ -183,10 +210,10 @@ export function useWorkspace() {
     const key = selected;
     const current = stateRef.current[key] ?? emptySession();
     const message = current.draft.trim();
-    if (!message || current.run || current.loading || statusRef.current.state !== 'connected') return;
+    if (!message || current.run || current.loading || switchingModel.current || statusRef.current.state !== 'connected') return;
     const id = crypto.randomUUID();
     update(key, state => beginRun(state, id, message));
-    setLocalSessions(prior => [{ key, displayName: message.slice(0, 32), updatedAt: Date.now() }, ...prior.filter(session => session.key !== key)]);
+    setLocalSessions(prior => [{ ...prior.find(session => session.key === key), key, displayName: message.slice(0, 32), updatedAt: Date.now() }, ...prior.filter(session => session.key !== key)]);
     try {
       const result = await window.kuro.send({ sessionKey: key, message, idempotencyKey: id });
       if (scope !== generation.current) return;
@@ -234,7 +261,7 @@ export function useWorkspace() {
   };
   const combined = [...sessions, ...localSessions.filter(local => !sessions.some(session => session.key === local.key))]
     .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
-  return { selected, sessions: combined, sessionLoading, sessionError, states, current: states[selected] ?? emptySession(), status, settings, notice, busy,
+  return { selected, sessions: combined, sessionLoading, sessionError, states, current: states[selected] ?? emptySession(), status, settings, notice, busy, modelSwitching, switchModel,
     selectSession, createSession, refreshSessions, loadHistory, send, stop, connectionAction, save, importWsl, setNotice,
     setDraft: (draft: string) => update(selected, state => ({ ...state, draft })) };
 }

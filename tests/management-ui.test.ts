@@ -24,7 +24,7 @@ async function open(): Promise<Page> {
       status: { state: 'connected', endpoint: 'ws://127.0.0.1:18789/' },
       models: { hash: 'revision-one', defaultModel: 'demo/model-a', providers: [{ id: 'demo', api: 'openai-completions', baseUrl: 'https://api.example.org/v1', hasApiKey: true, models: [{id: 'model-a',name: 'Alpha'}] }] },
       emit(value: any) { f.status = value; listeners.forEach(fn => fn(value)); },
-      saved: [], switched: [], installed: [], restarts: 0,
+      saved: [], switched: [], installed: [], restarts: 0, sent: [],
     };
     (window as any).fixture = f;
     (window as any).kuro = {
@@ -37,6 +37,7 @@ async function open(): Promise<Page> {
       listModels: async () => [{id:'demo/model-a',name:'Alpha',provider:'demo'}, {id:'demo/model-b',name:'Beta',provider:'demo'}],
       getModelSettings: async () => f.models,
       switchSessionModel: async (input: any) => { f.switched.push(input); },
+      send: async (input: any) => { f.sent.push(input); return { runId: input.idempotencyKey }; },
       saveModelSettings: async (input: any) => { f.saved.push(input); return {message:'配置已保存',restartRequired:true}; },
       listPlugins: async () => ({plugins:[{id:'calendar',name:'日历插件',description:'示例插件',enabled:true,status:'loaded',version:'1.0'}],diagnostics:[],environment:'WSL · Ubuntu-24.04'}),
       choosePluginSource: async () => 'C:\\Plugin Files\\calendar.zip',
@@ -66,6 +67,95 @@ test('Skills page filters actual status and keeps all navigation accessible at m
       const box = await page.getByRole('navigation').getByRole('button',{name:label,exact:true}).boundingBox();
       assert.ok(box && box.y >= 0 && box.y + box.height <= 641, `${label} navigation should fit`);
     }
+  } finally { await page.close(); }
+});
+
+test('chat dropdown switches immediately and supports reverting to the default model', async () => {
+  const page = await open();
+  try {
+    await page.getByRole('button', {name:'管理测试对话',exact:false}).click();
+    const picker = page.getByRole('combobox', {name:'当前对话模型'});
+    assert.equal(await picker.inputValue(), 'demo/model-a');
+    await picker.selectOption('demo/model-b');
+    await page.waitForFunction(() => (window as any).fixture.switched.length === 1);
+    assert.deepEqual(await page.evaluate(() => (window as any).fixture.switched[0]), {sessionKey:'agent:main:main',model:'demo/model-b'});
+    assert.equal(await picker.inputValue(), 'demo/model-b');
+    assert.equal(await page.locator('.composer').count(), 1, 'switch must stay in chat');
+    await picker.selectOption('');
+    await page.waitForFunction(() => (window as any).fixture.switched.length === 2);
+    assert.deepEqual(await page.evaluate(() => (window as any).fixture.switched[1]), {sessionKey:'agent:main:main',model:null});
+    assert.equal(await picker.inputValue(), '');
+    await page.setViewportSize({width:944,height:641});
+    const box = await picker.boundingBox();
+    const send = await page.getByRole('button', {name:'发送消息',exact:true}).boundingBox();
+    assert.ok(box && send && box.width >= 100 && box.x + box.width < send.x, 'model selector and send button must fit the minimum window');
+  } finally { await page.close(); }
+});
+
+test('pending and failed chat model switches preserve selection and prevent sending', async () => {
+  const page = await open();
+  try {
+    await page.getByRole('button', {name:'管理测试对话',exact:false}).click();
+    await page.evaluate(() => {
+      window.kuro.switchSessionModel = async input => {
+        (window as any).fixture.switched.push(input);
+        return new Promise((_resolve, reject) => { (window as any).fixture.failSwitch = () => reject(new Error('model unavailable')); });
+      };
+    });
+    await page.getByLabel('发送给库洛的消息').fill('hello');
+    const picker = page.getByRole('combobox', {name:'当前对话模型'});
+    await picker.selectOption('demo/model-b');
+    assert.equal(await picker.isDisabled(), true);
+    assert.equal(await page.getByRole('button', {name:'发送消息',exact:true}).isDisabled(), true);
+    await page.getByLabel('发送给库洛的消息').press('Enter');
+    assert.equal(await page.evaluate(() => (window as any).fixture.sent.length), 0);
+    await page.evaluate(() => (window as any).fixture.failSwitch());
+    await page.getByText('模型切换失败：model unavailable', {exact:true}).waitFor();
+    assert.equal(await picker.inputValue(), 'demo/model-a');
+    assert.equal(await picker.isEnabled(), true);
+    assert.equal(await page.getByLabel('发送给库洛的消息').inputValue(), 'hello');
+  } finally { await page.close(); }
+});
+
+test('chat model catalog failure can be retried and disconnect disables selection', async () => {
+  const page = await open();
+  try {
+    await page.evaluate(() => { window.kuro.listModels = async () => { throw new Error('catalog unavailable'); }; });
+    await page.getByRole('button', {name:'刷新模型列表',exact:true}).click();
+    await page.getByText('模型列表加载失败：catalog unavailable', {exact:true}).waitFor();
+    const picker = page.getByRole('combobox', {name:'当前对话模型'});
+    assert.equal(await picker.isDisabled(), true);
+    await page.evaluate(() => { window.kuro.listModels = async () => [{id:'demo/model-b',name:'Beta',provider:'demo'}]; });
+    await page.getByRole('button', {name:'刷新模型列表',exact:true}).click();
+    await page.waitForFunction(() => !(document.querySelector('.chat-model-select') as HTMLSelectElement).disabled);
+    assert.equal(await picker.locator('option[value="demo/model-b"]').count(), 1);
+    await page.evaluate(() => (window as any).fixture.emit({state:'disconnected',endpoint:'ws://127.0.0.1:18789/'}));
+    assert.equal(await picker.isDisabled(), true);
+  } finally { await page.close(); }
+});
+
+test('a delayed switch stays with its target conversation and replies lock model selection', async () => {
+  const page = await open();
+  try {
+    await page.getByRole('button', {name:'管理测试对话',exact:false}).click();
+    await page.evaluate(() => {
+      window.kuro.switchSessionModel = async input => {
+        (window as any).fixture.switched.push(input);
+        return new Promise(resolve => { (window as any).fixture.finishSwitch = resolve; });
+      };
+    });
+    const picker = page.getByRole('combobox', {name:'当前对话模型'});
+    await picker.selectOption('demo/model-b');
+    await page.getByRole('button', {name:'开启新对话',exact:false}).click();
+    await page.evaluate(() => (window as any).fixture.finishSwitch());
+    await page.waitForFunction(() => !(document.querySelector('.chat-model-select') as HTMLSelectElement).disabled);
+    assert.equal(await picker.inputValue(), '', 'new conversation must keep its own default');
+    await page.getByRole('button', {name:'管理测试对话',exact:false}).click();
+    assert.equal(await picker.inputValue(), 'demo/model-b');
+    await page.getByLabel('发送给库洛的消息').fill('hello');
+    await page.getByRole('button', {name:'发送消息',exact:true}).click();
+    await page.waitForFunction(() => (window as any).fixture.sent.length === 1);
+    assert.equal(await picker.isDisabled(), true, 'replying conversation must prevent model changes');
   } finally { await page.close(); }
 });
 

@@ -52,6 +52,17 @@ try {
     await page.getByRole('button', { name: '和 Shizuku 打招呼' }).click();
     await page.waitForSelector('[data-live2d-motion="Tap"]');
     await page.waitForSelector('[data-live2d-motion="Idle"]', { timeout: 6000 });
+    const stage = await page.locator('.live2d-stage').boundingBox();
+    const x = stage.x + stage.width / 2;
+    const y = stage.y + stage.height / 2;
+    for (const [dx, dy, motion] of [[0, -60, 'FlickUp'], [65, 0, 'Flick3']]) {
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + dx, y + dy, { steps: 5 });
+      await page.mouse.up();
+      await page.waitForSelector(`[data-live2d-motion="${motion}"]`);
+      await page.waitForSelector('[data-live2d-motion="Idle"]', { timeout: 6000 });
+    }
     await page.evaluate(() => {
       const canvas = document.querySelector('.live2d-stage canvas');
       const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
@@ -62,6 +73,8 @@ try {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.waitForTimeout(200);
     assert.equal(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches), true);
+    assert.equal(await page.getByRole('button', { name: '和 Shizuku 打招呼' }).isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '和 Shizuku 打招呼' }).getAttribute('title'), '已按系统设置减少动态效果');
     const draws = await page.evaluate(() => window.live2dDrawCalls);
     await page.waitForTimeout(400);
     assert.equal(await page.evaluate(() => window.live2dDrawCalls), draws, 'reduced motion must stop draw calls');
@@ -77,6 +90,7 @@ try {
     await page.getByRole('button', { name: '收起角色' }).click();
     assert.equal(await page.locator('.live2d-stage canvas').count(), 0);
     assert.equal(await page.getByRole('textbox', { name: '发送给库洛的消息' }).inputValue(), '保留这个草稿');
+    await page.screenshot({ path: resolve(artifacts, 'static-character.png') });
     await page.reload();
     await page.getByRole('button', { name: '展开角色' }).waitFor();
     assert.equal(await page.locator('.live2d-stage canvas').count(), 0);

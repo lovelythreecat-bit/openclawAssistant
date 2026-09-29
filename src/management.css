@@ -1,9 +1,22 @@
 .app-shell .rail-nav { gap: 5px; margin-top: 24px; min-height: 0; overflow-y: auto; }
 .app-shell .rail-button { padding: 10px 0 8px; gap: 6px; flex-shrink: 0; }
 .app-shell .rail-bottom { flex-shrink: 0; padding-top: 12px; }
-.model-shortcut { border-radius: 6px; padding: 5px; text-align: left; min-width: 0; }
-.model-shortcut:hover { background: #f8eaf2; }
-.model-shortcut > span:last-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 230px; }
+.chat-model-picker { min-width: 0; max-width: calc(100% - 48px); }
+.chat-model-controls { display: flex; align-items: center; min-width: 0; gap: 4px; }
+.chat-model-field { position: relative; display: flex; align-items: center; min-width: 0; width: 252px; max-width: 100%; color: #a37b92; }
+.chat-model-select { appearance: none; min-width: 0; width: 100%; height: 34px; border: 1px solid var(--line); border-radius: 12px; padding: 0 30px 0 32px; background: #fff8fb; color: #76556b; font: inherit; font-size: 12px; font-weight: 500; text-overflow: ellipsis; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s; }
+.chat-model-select:hover:not(:disabled) { border-color: #d7b5c9; background: #fff0f6; }
+.chat-model-select:focus-visible { outline: 2px solid #b999d9; outline-offset: 2px; box-shadow: 0 0 0 4px #eacbdf22; }
+.chat-model-select:disabled { color: var(--muted); cursor: not-allowed; }
+.chat-model-icon, .chat-model-chevron { position: absolute; pointer-events: none; }
+.chat-model-icon { left: 11px; }
+.chat-model-chevron { right: 10px; }
+.chat-model-field.is-disabled { opacity: .65; }
+.chat-model-controls > .icon-button { flex-shrink: 0; width: 30px; height: 30px; padding: 0; border-radius: 9px; color: #94768b; }
+.chat-model-controls > .icon-button:hover:not(:disabled) { background: #f8eef4; color: #76556b; }
+.chat-model-controls > .icon-button:focus-visible { outline: 2px solid #b999d9; outline-offset: 2px; }
+.chat-model-controls > .icon-button:disabled { opacity: .45; cursor: not-allowed; }
+.chat-model-feedback { display: block; margin-top: 5px; color: #a66479; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
 @media (max-height: 760px) { .rail-bottom .tiny-flower { display: none; } }
 .management-scroll { padding-top: 34px; padding-bottom: 42px; }
 .management-content { max-width: 980px; margin: 0 auto; }

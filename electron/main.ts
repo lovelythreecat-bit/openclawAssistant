@@ -161,7 +161,7 @@ function createWindow() {
   window = new BrowserWindow({
     width:1320,height:860,minWidth:960,minHeight:680,title:'库洛 · OpenClaw 工作台',
     backgroundColor:'#fff8fb',show:false,autoHideMenuBar:true,
-    icon:join(root,'assets/concepts/mascot-welcome-v1.png'),
+    icon:join(root,'assets/concepts/shizuku-icon.png'),
     webPreferences:{preload:join(root,'electron/preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true},
   });
   window.removeMenu();

@@ -12,7 +12,7 @@ files:
   - dist/**/*
   - dist-electron/**/*
   - electron/preload.cjs
-  - assets/concepts/mascot-welcome-v1.png
+  - assets/concepts/shizuku-icon.png
   - package.json
 win:
   executableName: Kuro

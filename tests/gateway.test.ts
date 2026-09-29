@@ -5,6 +5,7 @@ import test from 'node:test';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { GatewayClient } from '../electron/gateway.js';
+import { createModelManager } from '../electron/models.js';
 import { createIdentity, signDevice, type DeviceIdentity } from '../electron/identity.js';
 
 type JsonRecord = Record<string, any>;
@@ -337,6 +338,43 @@ test('pairing errors explain the action and redact known credentials', async (t)
   );
   assert.equal(client.getStatus().state, 'error');
   assert.equal(JSON.stringify(client.getStatus()).includes(secret), false);
+});
+
+test('model save exposes the pending approval command and succeeds when retried after approval', { timeout: 5_000 }, async (t) => {
+  const requestId = 'e5c48e71-01ab-4134-bebd-e41b8ad3f956';
+  let approved = false;
+  let writes = 0;
+  const gateway = await startGateway((frame, socket) => {
+    if (frame.method === 'connect' && !approved) {
+      socket.send(JSON.stringify({ type: 'res', id: frame.id, ok: false, error: {
+        code: 'NOT_PAIRED', message: 'pairing required secret-provider-key', details: { requestId },
+      } }));
+    } else if (frame.method === 'connect') respond(socket, frame, helloPayload());
+    else if (frame.method === 'config.patch') { writes++; respond(socket, frame, { ok: true }); }
+  });
+  const client = new GatewayClient();
+  t.after(async () => { client.disconnect(); await gateway.close(); });
+  const options = { url: gateway.url, identity: createIdentity(), token: 'shared-secret', management: true };
+  const manager = createModelManager(async <T>(method: string, params: unknown): Promise<T> => {
+    if (method === 'config.get') return { valid: true, hash: 'config-hash', config: {} } as T;
+    if (client.getStatus().state !== 'connected') await client.connect(options);
+    return client.request<T>(method, params);
+  });
+  const input = { hash: 'config-hash', provider: {
+    id: 'acme', baseUrl: 'https://api.example.com/v1', api: 'openai-completions',
+    models: [{ id: 'new', name: 'New' }],
+  } };
+  await assert.rejects(manager.saveModelSettings(input), (error: Error) => {
+    assert.equal(error.message.includes(`openclaw devices approve ${requestId}`), true);
+    assert.match(error.message, /批准.*重新保存/);
+    assert.equal(error.message.includes('secret-provider-key'), false);
+    return true;
+  });
+  assert.equal(writes, 0);
+  approved = true;
+  const result = await manager.saveModelSettings(input);
+  assert.equal(result.restartRequired, true);
+  assert.equal(writes, 1);
 });
 
 test('disconnect rejects pending work and a new generation ignores stale socket callbacks', async (t) => {

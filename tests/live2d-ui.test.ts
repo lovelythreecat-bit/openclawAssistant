@@ -14,7 +14,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-test('pointer movement drives the actual legacy eye parameter', async () => {
+test('pointer movement on either side of the character drives the actual legacy eye parameter', async () => {
   const page = await browser.newPage({ bypassCSP: true, viewport: { width: 1320, height: 860 } });
   await page.addInitScript('globalThis.__name = value => value');
   await page.goto(base);
@@ -28,13 +28,66 @@ test('pointer movement drives the actual legacy eye parameter', async () => {
       return original.call(this);
     };
   });
-  await page.mouse.move(5, 400);
+  const stage = (await page.locator('.live2d-stage').boundingBox())!;
+  // Both points are in the right-hand companion panel. Window-centred
+  // tracking would keep looking right even when the pointer is left of her.
+  await page.mouse.move(stage.x + 5, stage.y + stage.height * 0.25);
   await page.waitForTimeout(700);
   const left = await page.evaluate(() => (window as any).latestEyeX);
-  await page.mouse.move(1310, 400);
+  await page.mouse.move(stage.x + stage.width - 5, stage.y + stage.height * 0.25);
   await page.waitForTimeout(700);
   const right = await page.evaluate(() => (window as any).latestEyeX);
   assert.ok(right - left > 0.4, `eye parameter should follow pointer: ${left} → ${right}`);
+  assert.ok(left < -0.15 && right > 0.15, `gaze should be relative to the character: ${left} → ${right}`);
+  await page.close();
+});
+
+test('the greeting plays once, returns to idle, and remains keyboard accessible', async () => {
+  const page = await browser.newPage({ bypassCSP: true, viewport: { width: 1320, height: 860 } });
+  await page.addInitScript('globalThis.__name = value => value');
+  await page.goto(base);
+  await page.waitForSelector('[data-live2d-state="ready"]');
+  const button = page.getByRole('button', { name: '和 Shizuku 打招呼' });
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-live2d-motion="Tap"]');
+  assert.equal(await button.isDisabled(), true, 'the current interaction must not be restarted by repeated clicks');
+  await page.waitForSelector('[data-live2d-motion="Idle"]', { timeout: 6000 });
+  assert.equal(await button.isEnabled(), true);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByTitle('已按系统设置减少动态效果').waitFor();
+  assert.equal(await button.isDisabled(), true);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await button.click();
+  await page.waitForSelector('[data-live2d-motion="Tap"]');
+  await page.close();
+});
+
+test('character taps and flicks trigger different motions while empty stage clicks do nothing', async () => {
+  const page = await browser.newPage({ bypassCSP: true, viewport: { width: 1320, height: 860 } });
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript('globalThis.__name = value => value');
+  await page.goto(base);
+  await page.waitForSelector('[data-live2d-state="ready"]');
+  const stage = (await page.locator('.live2d-stage').boundingBox())!;
+  await page.mouse.click(stage.x + 2, stage.y + 2);
+  await page.waitForTimeout(150);
+  assert.equal(await page.locator('.companion-panel').getAttribute('data-live2d-motion'), 'Idle');
+  const x = stage.x + stage.width / 2;
+  const y = stage.y + stage.height / 2;
+  await page.mouse.click(x, y);
+  await page.waitForSelector('[data-live2d-motion="Tap"]');
+  await page.waitForSelector('[data-live2d-motion="Idle"]', { timeout: 6000 });
+  for (const [dx, dy, motion] of [[0, -60, 'FlickUp'], [65, 0, 'Flick3']] as const) {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForSelector(`[data-live2d-motion="${motion}"]`);
+    await page.waitForSelector('[data-live2d-motion="Idle"]', { timeout: 6000 });
+  }
+  assert.deepEqual(errors, []);
   await page.close();
 });
 

@@ -1,4 +1,5 @@
 import { validateSessionKey } from './settings.js';
+import { GatewayRequestError } from './gateway.js';
 import type { ModelOption, ModelSettings, SaveModelSettingsInput, MutationResult } from '../src/management-types.js';
 
 type GatewayRequest = <T = unknown>(method: string, params: unknown) => Promise<T>;
@@ -27,7 +28,10 @@ function identifier(value: unknown, label: string, provider = false): string {
 }
 function publicFailure(error: unknown): Error {
   const message = error instanceof Error ? error.message : '';
-  if (/operator\.admin|missing scope|pairing required/i.test(message)) return new Error('此操作需要 OpenClaw 管理权限，请重新连接并在 OpenClaw 中批准设备管理权限。');
+  if (error instanceof GatewayRequestError && error.pairingRequestId) {
+    return new Error(`OpenClaw 正在等待设备管理权限批准。请在运行该网关的环境中执行：openclaw devices approve ${error.pairingRequestId}。批准后返回此页重新保存；若请求已过期，请再次保存生成新请求。`);
+  }
+  if (/operator\.admin|missing scope|pairing required|requires pairing|scope upgrade pending approval/i.test(message)) return new Error('此操作需要 OpenClaw 管理权限。请在运行该网关的环境中执行 openclaw devices list，找到“库洛桌面”的待批准请求，再执行 openclaw devices approve <请求编号>。批准后重新保存。');
   if (/base hash|config changed|配置已变更/.test(message)) return new Error('配置已变更，请刷新后重试。');
   // Gateway errors may echo provider credentials or the submitted config body.
   return new Error('模型操作失败，请检查网关连接、模型配置和权限后重试。');

@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 
-const executable = resolve('release/Kuro-0.1.0-Windows-x64.exe');
+const executable = resolve(process.argv[2] || 'release/Kuro-0.1.0-Windows-x64.exe');
 const profile = resolve('.test-data/portable-profile');
 const artifacts = resolve('.test-data/portable');
 await mkdir(artifacts,{recursive:true});
@@ -52,6 +52,20 @@ try {
   if (await page.getByRole('button',{name:'展开角色'}).count()) await page.getByRole('button',{name:'展开角色'}).click();
   await page.waitForSelector('[data-live2d-state="ready"]',{timeout:20000});
   assert.equal(await page.locator('.live2d-stage canvas').count(),1);
+  assert.equal(await page.getByRole('combobox', { name: '当前对话模型' }).count(), 1);
+  assert.match(await page.locator('.avatar img').first().getAttribute('src'), /shizuku-icon-/);
+  assert.match(await page.locator('.hero-art img').getAttribute('src'), /shizuku-welcome-/);
+  const stage = await page.locator('.live2d-stage').boundingBox();
+  const x = stage.x + stage.width / 2;
+  const y = stage.y + stage.height / 2;
+  for (const [dx, dy, motion] of [[0, -60, 'FlickUp'], [65, 0, 'Flick3']]) {
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + dx, y + dy, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForSelector(`[data-live2d-motion="${motion}"]`);
+    await page.waitForSelector('[data-live2d-motion="Idle"]', { timeout: 6000 });
+  }
   await page.screenshot({path:resolve(artifacts,'welcome.png')});
   for (const label of ['Skills','模型','插件']) {
     await page.getByRole('button',{name:label,exact:true}).click();

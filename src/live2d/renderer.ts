@@ -1,4 +1,4 @@
-import { Application, ShaderSystem, Texture, utils } from 'pixi.js';
+import { Application, Point, ShaderSystem, Texture, utils } from 'pixi.js';
 import { install } from '@pixi/unsafe-eval';
 import type { Cubism4InternalModel, Live2DModel } from 'pixi-live2d-display/cubism4';
 import shizuku from '../../public/live2d/shizuku/shizuku.model3.json';
@@ -26,8 +26,11 @@ function loadCore(): Promise<void> {
   return corePromise;
 }
 
+export type CompanionAction = 'Tap' | 'FlickUp' | 'Flick3';
+
 export interface CompanionRenderer {
   greet(): Promise<boolean>;
+  interact(action: CompanionAction): Promise<boolean>;
   destroy(): void;
 }
 
@@ -35,6 +38,7 @@ export function mountCompanion(host: HTMLDivElement, callbacks: {
   ready(): void;
   error(error: unknown): void;
   motion(name: string): void;
+  reducedMotion?(value: boolean): void;
 }): CompanionRenderer {
   let disposed = false;
   let loaded = false;
@@ -44,8 +48,24 @@ export function mountCompanion(host: HTMLDivElement, callbacks: {
   let observer: ResizeObserver | undefined;
   let removeListeners = () => {};
   let reducedMotion = false;
+  let interacting = false;
   const modelURL = new URL('live2d/shizuku/shizuku.model3.json', document.baseURI).href;
   const textureURLs = shizuku.FileReferences.Textures.map(file => new URL(file, modelURL).href);
+
+  const interact = async (action: CompanionAction) => {
+    if (!loaded || disposed || failed || reducedMotion || interacting || !model) return false;
+    interacting = true;
+    try {
+      const played = await model.motion(action, 0, 3);
+      if (disposed) return false;
+      if (played) callbacks.motion(action); else interacting = false;
+      return played;
+    } catch (error) {
+      interacting = false;
+      if (!disposed) callbacks.error(error);
+      return false;
+    }
+  };
 
   const release = () => {
     loaded = false;
@@ -103,10 +123,10 @@ export function mountCompanion(host: HTMLDivElement, callbacks: {
         { parameterId: 'PARAM_ANGLE_Z', offset: 0, peak: 2, cycle: 5.5, weight: 0.5 },
         { parameterId: 'PARAM_BREATH', offset: 0.5, peak: 0.5, cycle: 3.2, weight: 1 },
       ]);
-      const tap = await internal.motionManager.loadMotion('Tap', 0);
+      const actions = await Promise.all(['Tap', 'FlickUp', 'Flick3'].map(group => internal.motionManager.loadMotion(group, 0)));
       if (disposed) { release(); return; }
-      tap?.setIsLoop(false);
-      internal.motionManager.on('motionFinish', () => callbacks.motion('Idle'));
+      actions.forEach(action => action?.setIsLoop(false));
+      internal.motionManager.on('motionFinish', () => { interacting = false; callbacks.motion('Idle'); });
       app.stage.addChild(character);
       const draw = (advance = false) => {
         if (failed || !app) return;
@@ -133,17 +153,61 @@ export function mountCompanion(host: HTMLDivElement, callbacks: {
       const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
       const move = (event: PointerEvent) => {
         if (reducedMotion) return;
+        const bounds = host.getBoundingClientRect();
+        const width = internal.width * character.scale.x;
+        const height = internal.height * character.scale.y;
+        // Look towards the pointer relative to the character, including when
+        // the pointer is in the chat area to the left of the companion.
         internal.focusController.focus(
-          Math.max(-0.65, Math.min(0.65, (event.clientX / innerWidth - 0.5) * 1.3)),
-          Math.max(-0.5, Math.min(0.5, (0.5 - event.clientY / innerHeight))),
+          Math.max(-1, Math.min(1, (event.clientX - bounds.left - character.x - width / 2) / (width / 2))),
+          Math.max(-0.8, Math.min(0.8, (bounds.top + character.y + height * 0.25 - event.clientY) / (height * 0.3))),
         );
       };
       const neutral = () => internal.focusController.focus(0, 0);
+      const pointOnCharacter = (event: PointerEvent) => {
+        const bounds = host.getBoundingClientRect();
+        const point = new Point((event.clientX - bounds.left) * host.clientWidth / bounds.width,
+          (event.clientY - bounds.top) * host.clientHeight / bounds.height);
+        if (Object.keys(internal.hitAreas).length) return character.hitTest(point.x, point.y).length > 0;
+        // Shizuku ships with no HitAreas. Use its visible drawable bounds as
+        // the fallback instead of making the entire empty stage clickable.
+        const local = character.toModelPosition(point);
+        return internal.getDrawableIDs().some((_, index) => {
+          if (internal.coreModel.getDrawableOpacity(index) <= 0) return false;
+          const area = internal.getDrawableBounds(index);
+          return local.x >= area.x && local.x <= area.x + area.width
+            && local.y >= area.y && local.y <= area.y + area.height;
+        });
+      };
+      let gesture: { id: number; x: number; y: number } | undefined;
+      const pointerDown = (event: PointerEvent) => {
+        if (event.button !== 0 || !event.isPrimary || reducedMotion || interacting || !pointOnCharacter(event)) return;
+        gesture = { id: event.pointerId, x: event.clientX, y: event.clientY };
+        host.setPointerCapture(event.pointerId);
+      };
+      const pointerUp = (event: PointerEvent) => {
+        if (gesture?.id !== event.pointerId) return;
+        const start = gesture;
+        gesture = undefined;
+        if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId);
+        const dx = event.clientX - start.x;
+        const dy = event.clientY - start.y;
+        if (dy < -30 && Math.abs(dy) > Math.abs(dx)) void interact('FlickUp');
+        else if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy)) void interact('Flick3');
+        else if (Math.hypot(dx, dy) < 12 && pointOnCharacter(event)) void interact('Tap');
+      };
+      const cancelGesture = () => { gesture = undefined; };
       const visibility = () => {
         if (!app) return;
         if (document.hidden || reducedMotion || failed) app.stop(); else app.start();
       };
-      const preferences = () => { reducedMotion = preference.matches; neutral(); visibility(); };
+      const preferences = () => {
+        reducedMotion = preference.matches;
+        callbacks.reducedMotion?.(reducedMotion);
+        neutral();
+        cancelGesture();
+        visibility();
+      };
       const contextLost = (event: Event) => {
         event.preventDefault();
         failed = true;
@@ -152,12 +216,22 @@ export function mountCompanion(host: HTMLDivElement, callbacks: {
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('blur', neutral);
+      document.documentElement.addEventListener('pointerleave', neutral);
+      host.addEventListener('pointerdown', pointerDown);
+      host.addEventListener('pointerup', pointerUp);
+      host.addEventListener('pointercancel', cancelGesture);
+      host.addEventListener('lostpointercapture', cancelGesture);
       document.addEventListener('visibilitychange', visibility);
       preference.addEventListener('change', preferences);
       canvas.addEventListener('webglcontextlost', contextLost);
       removeListeners = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('blur', neutral);
+        document.documentElement.removeEventListener('pointerleave', neutral);
+        host.removeEventListener('pointerdown', pointerDown);
+        host.removeEventListener('pointerup', pointerUp);
+        host.removeEventListener('pointercancel', cancelGesture);
+        host.removeEventListener('lostpointercapture', cancelGesture);
         document.removeEventListener('visibilitychange', visibility);
         preference.removeEventListener('change', preferences);
         canvas.removeEventListener('webglcontextlost', contextLost);
@@ -181,14 +255,8 @@ export function mountCompanion(host: HTMLDivElement, callbacks: {
   loadingQueue = loadingQueue.then(load, load);
 
   return {
-    async greet() {
-      if (!loaded || disposed || failed || reducedMotion || !model) return false;
-      try {
-        const played = await model.motion('Tap', 0, 3);
-        if (played && !disposed) callbacks.motion('Tap');
-        return played;
-      } catch (error) { if (!disposed) callbacks.error(error); return false; }
-    },
+    greet: () => interact('Tap'),
+    interact,
     destroy() {
       disposed = true;
       // Pending loads finish in the queue and then release their resources.

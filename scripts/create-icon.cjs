@@ -3,7 +3,7 @@ const { mkdirSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 
 const projectRoot = path.resolve(__dirname, '..');
-const source = path.join(projectRoot, 'assets', 'concepts', 'mascot-welcome-v1.png');
+const source = path.join(projectRoot, 'assets', 'concepts', 'shizuku-icon.png');
 const destination = path.join(projectRoot, 'assets', 'concepts', 'kuro.ico');
 
 function pngToIco(png) {

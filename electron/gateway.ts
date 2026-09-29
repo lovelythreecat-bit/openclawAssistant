@@ -54,6 +54,16 @@ const CLIENT = {
 } as const;
 const SCOPES = ['operator.read', 'operator.write'] as const;
 
+export class GatewayRequestError extends Error {
+  readonly pairingRequestId?: string;
+
+  constructor(message: string, requestId?: string) {
+    super(message);
+    this.name = 'GatewayRequestError';
+    if (requestId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(requestId)) this.pairingRequestId = requestId;
+  }
+}
+
 function positiveNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
@@ -390,7 +400,7 @@ export class GatewayClient extends EventEmitter {
   private failConnect(generation: number, error: Error): void {
     const attempt = this.attempt;
     if (!attempt || attempt.generation !== generation || attempt.settled) return;
-    const safeError = new Error(this.redact(error.message));
+    const safeError = this.asError(error, 'Gateway connect failed');
     attempt.settled = true;
     this.attempt = null;
     this.rejectPending(safeError, generation);
@@ -445,11 +455,17 @@ export class GatewayClient extends EventEmitter {
     const action = pairing && requestId
       ? ` Approve pairing request ${requestId} in OpenClaw, then reconnect.`
       : '';
-    return new Error(this.redact(`[${code}] ${message}${action}`));
+    return new GatewayRequestError(
+      this.redact(`[${code}] ${message}${action}`),
+      pairing && requestId ? this.redact(requestId) : undefined,
+    );
   }
 
   private asError(error: unknown, fallback: string): Error {
     const message = error instanceof Error ? error.message : String(error || fallback);
+    if (error instanceof GatewayRequestError) {
+      return new GatewayRequestError(this.redact(message), error.pairingRequestId ? this.redact(error.pairingRequestId) : undefined);
+    }
     return new Error(this.redact(message || fallback));
   }
 
